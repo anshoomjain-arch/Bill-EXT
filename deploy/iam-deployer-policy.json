@@ -1,0 +1,84 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CloudFormationStacks",
+      "Effect": "Allow",
+      "Action": "cloudformation:*",
+      "Resource": [
+        "arn:aws:cloudformation:ap-southeast-2:ACCOUNT_ID:stack/bill-ocr-demo/*",
+        "arn:aws:cloudformation:ap-southeast-2:ACCOUNT_ID:stack/aws-sam-cli-managed-default/*",
+        "arn:aws:cloudformation:ap-southeast-2:aws:transform/Serverless-2016-10-31"
+      ]
+    },
+    {
+      "Sid": "CloudFormationGlobal",
+      "Effect": "Allow",
+      "Action": ["cloudformation:ValidateTemplate", "cloudformation:GetTemplateSummary", "cloudformation:ListStacks"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3DemoAndSamBuckets",
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::bill-ocr-demo-bills-ACCOUNT_ID",
+        "arn:aws:s3:::bill-ocr-demo-bills-ACCOUNT_ID/*",
+        "arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-*",
+        "arn:aws:s3:::aws-sam-cli-managed-default-samclisourcebucket-*/*"
+      ]
+    },
+    {
+      "Sid": "EcrImageRepo",
+      "Effect": "Allow",
+      "Action": "ecr:*",
+      "Resource": "arn:aws:ecr:ap-southeast-2:ACCOUNT_ID:repository/billocrdemo*"
+    },
+    {
+      "Sid": "EcrLogin",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "LambdaFunctions",
+      "Effect": "Allow",
+      "Action": "lambda:*",
+      "Resource": "arn:aws:lambda:ap-southeast-2:ACCOUNT_ID:function:bill-ocr-demo-*"
+    },
+    {
+      "Sid": "LambdaRoles",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:TagRole", "iam:UntagRole",
+        "iam:PutRolePolicy", "iam:DeleteRolePolicy", "iam:GetRolePolicy",
+        "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:PassRole"
+      ],
+      "Resource": "arn:aws:iam::ACCOUNT_ID:role/bill-ocr-demo-*"
+    },
+    {
+      "Sid": "HttpApi",
+      "Effect": "Allow",
+      "Action": ["apigateway:*"],
+      "Resource": [
+        "arn:aws:apigateway:ap-southeast-2::/apis",
+        "arn:aws:apigateway:ap-southeast-2::/apis/*",
+        "arn:aws:apigateway:ap-southeast-2::/tags/*"
+      ]
+    },
+    {
+      "Sid": "LogGroups",
+      "Effect": "Allow",
+      "Action": ["logs:CreateLogGroup", "logs:DeleteLogGroup", "logs:PutRetentionPolicy", "logs:DeleteRetentionPolicy",
+                 "logs:TagResource", "logs:UntagResource", "logs:FilterLogEvents", "logs:GetLogEvents",
+                 "logs:DescribeLogStreams"],
+      "Resource": "arn:aws:logs:ap-southeast-2:ACCOUNT_ID:log-group:/aws/lambda/bill-ocr-demo-*"
+    },
+    {
+      "Sid": "LogGroupsDescribe",
+      "Effect": "Allow",
+      "Action": "logs:DescribeLogGroups",
+      "Resource": "*"
+    }
+  ]
+}

@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Bill extractor demo - pipeline 2. Same PaddleOCR step as pipeline 1 (stack bill-ocr-demo, untouched),
+  but the 69 fields are selected by Qwen3 32B on Amazon Bedrock. Own S3 bucket, HTTP API and Lambdas.
+
+Parameters:
+  AllowedOrigin:
+    Type: String
+    Default: "*"
+    Description: Web UI origin allowed by CORS (the Amplify URL)
+  OcrMemoryMB:
+    Type: Number
+    Default: 3008
+    Description: OCR Lambda memory (3008 MB is this account's current Lambda limit)
+  QwenModelId:
+    Type: String
+    Default: qwen.qwen3-32b-v1:0
+    Description: Bedrock model id (or inference profile id) of Qwen3 32B (dense)
+  BedrockRegion:
+    Type: String
+    Default: ap-southeast-2
+    Description: Region the Bedrock model is called in
+
+Globals:
+  Function:
+    Architectures: [x86_64]
+
+Resources:
+  # ------------------------------------------------------------------ storage
+  BillsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-bills-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      LifecycleConfiguration:   # demo data is deleted after a day
+        Rules:
+          - {Id: expire-uploads, Status: Enabled, Prefix: uploads/, ExpirationInDays: 1}
+          - {Id: expire-results, Status: Enabled, Prefix: results/, ExpirationInDays: 1}
+      CorsConfiguration:        # browser uploads straight to S3 with a presigned POST
+        CorsRules:
+          - AllowedMethods: [POST]
+            AllowedOrigins: [!Ref AllowedOrigin]
+            AllowedHeaders: ["*"]
+            MaxAge: 3000
+
+  # ------------------------------------------------------------------ OCR + Qwen (container image)
+  QwenOcrFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      MemorySize: !Ref OcrMemoryMB
+      Timeout: 900
+      # No ReservedConcurrentExecutions: this account's total limit is 10 and must stay unreserved.
+      # The API refuses new jobs while 2 are running instead (MAX_ACTIVE_JOBS in api/app.py).
+      Environment:
+        Variables:
+          RESULTS_PREFIX: results/
+          QWEN_MODEL_ID: !Ref QwenModelId
+          BEDROCK_REGION: !Ref BedrockRegion
+      Policies:
+        # bucket referenced by name, not !Ref, to avoid a bucket <-> function circular dependency
+        - S3ReadPolicy: {BucketName: !Sub "${AWS::StackName}-bills-${AWS::AccountId}"}
+        - Statement:
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "arn:aws:s3:::${AWS::StackName}-bills-${AWS::AccountId}/results/*"
+            - Effect: Allow                  # Qwen models only
+              Action: bedrock:InvokeModel
+              Resource:
+                - "arn:aws:bedrock:*::foundation-model/qwen.*"
+                - !Sub "arn:aws:bedrock:*:${AWS::AccountId}:inference-profile/*qwen*"
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0            # a failed/timed-out run is not retried (would bill again)
+        MaximumEventAgeInSeconds: 3600
+      Events:
+        Upload:
+          Type: S3
+          Properties:
+            Bucket: !Ref BillsBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules: [{Name: prefix, Value: uploads/}]
+    Metadata:
+      DockerContext: .
+      Dockerfile: container/qwen/Dockerfile
+      DockerTag: v1
+
+  QwenOcrLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${QwenOcrFunction}"
+      RetentionInDays: 7
+
+  # ------------------------------------------------------------------ API (zip, same code as pipeline 1)
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: [!Ref AllowedOrigin]
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: [content-type]
+        MaxAge: 3000
+      DefaultRouteSettings:                # cost guard against abuse
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: api/
+      Handler: app.handler
+      Runtime: python3.11
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          BUCKET: !Ref BillsBucket
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: s3:PutObject           # needed to sign the upload form
+              Resource: !Sub "${BillsBucket.Arn}/uploads/*"
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "${BillsBucket.Arn}/results/*"
+            - Effect: Allow
+              Action: s3:ListBucket          # missing result = "NoSuchKey"; busy guard lists uploads/
+              Resource: !GetAtt BillsBucket.Arn
+      Events:
+        CreateJob:
+          Type: HttpApi
+          Properties: {ApiId: !Ref HttpApi, Method: POST, Path: /jobs}
+        GetJob:
+          Type: HttpApi
+          Properties: {ApiId: !Ref HttpApi, Method: GET, Path: "/jobs/{job_id}"}
+
+  ApiLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ApiFunction}"
+      RetentionInDays: 7
+
+Outputs:
+  ApiUrl:
+    Description: Pipeline 2 API base URL (web/config.js BILL_QWEN_API_URL)
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"
+  BucketName:
+    Value: !Ref BillsBucket

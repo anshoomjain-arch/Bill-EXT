@@ -1,0 +1,27 @@
+# local environments / caches
+paddle-env/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# generated output
+output/
+
+# SAM / Docker build artefacts
+.aws-sam/
+samconfig.toml
+
+# secrets - never commit AWS credentials
+.env
+.env.*
+.aws/
+*.pem
+credentials
+
+# OCR models copied for the Docker build (scripts/copy_models.py)
+models/
+
+# local-only tools (Lambda runtime emulator)
+.tools/

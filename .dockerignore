@@ -1,0 +1,8 @@
+*
+!requirements.txt
+!billocr/
+!container/ocr/app.py
+!models/
+!pipeline2/
+!container/qwen/app.py
+**/__pycache__

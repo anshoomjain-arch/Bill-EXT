@@ -1,0 +1,41 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "QwenPipelineStack",
+      "Effect": "Allow",
+      "Action": "cloudformation:*",
+      "Resource": "arn:aws:cloudformation:ap-southeast-2:ACCOUNT_ID:stack/bill-ocr-demo-qwen/*"
+    },
+    {
+      "Sid": "QwenPipelineBucket",
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": [
+        "arn:aws:s3:::bill-ocr-demo-qwen-bills-ACCOUNT_ID",
+        "arn:aws:s3:::bill-ocr-demo-qwen-bills-ACCOUNT_ID/*"
+      ]
+    },
+    {
+      "Sid": "BedrockFindModel",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:ListFoundationModels",
+        "bedrock:GetFoundationModel",
+        "bedrock:ListInferenceProfiles",
+        "bedrock:GetInferenceProfile",
+        "bedrock:GetFoundationModelAvailability"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "BedrockInvokeQwenForLocalTests",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": [
+        "arn:aws:bedrock:*::foundation-model/qwen.*",
+        "arn:aws:bedrock:*:ACCOUNT_ID:inference-profile/*qwen*"
+      ]
+    }
+  ]
+}

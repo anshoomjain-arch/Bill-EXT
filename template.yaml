@@ -1,0 +1,144 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Bill extractor demo - upload an electricity bill image, PaddleOCR + KESCO/UPPCL rules
+  extract the fields. S3 + API Gateway HTTP API + 2 Lambdas (zip API, container OCR).
+
+Parameters:
+  AllowedOrigin:
+    Type: String
+    Default: "*"
+    Description: Web UI origin allowed by CORS (set to the Amplify URL once it exists)
+  OcrMemoryMB:
+    Type: Number
+    Default: 3008
+    Description: >
+      OCR Lambda memory; CPU scales with it. 3008 MB (~1.7 vCPU, ~10 min per bill) is this account's
+      current Lambda limit; 10240 MB (6 vCPU, ~3-5 min) needs a Lambda memory quota increase.
+
+Globals:
+  Function:
+    Architectures: [x86_64]
+
+Resources:
+  # ------------------------------------------------------------------ storage
+  BillsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-bills-${AWS::AccountId}"
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: {SSEAlgorithm: AES256}
+      LifecycleConfiguration:   # demo data is deleted after a day
+        Rules:
+          - {Id: expire-uploads, Status: Enabled, Prefix: uploads/, ExpirationInDays: 1}
+          - {Id: expire-results, Status: Enabled, Prefix: results/, ExpirationInDays: 1}
+      CorsConfiguration:        # browser uploads straight to S3 with a presigned POST
+        CorsRules:
+          - AllowedMethods: [POST]
+            AllowedOrigins: [!Ref AllowedOrigin]
+            AllowedHeaders: ["*"]
+            MaxAge: 3000
+
+  # ------------------------------------------------------------------ OCR (container image)
+  OcrFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      PackageType: Image
+      MemorySize: !Ref OcrMemoryMB
+      Timeout: 900
+      # No ReservedConcurrentExecutions: this account's total limit is 10 and must stay unreserved.
+      # The API refuses new jobs while 2 are running instead (MAX_ACTIVE_JOBS in api/app.py).
+      Environment:
+        Variables:
+          RESULTS_PREFIX: results/
+      Policies:
+        # bucket referenced by name, not !Ref, to avoid a bucket <-> function circular dependency
+        - S3ReadPolicy: {BucketName: !Sub "${AWS::StackName}-bills-${AWS::AccountId}"}
+        - Statement:
+            - Effect: Allow
+              Action: s3:PutObject
+              Resource: !Sub "arn:aws:s3:::${AWS::StackName}-bills-${AWS::AccountId}/results/*"
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0            # a failed/timed-out run is not retried (would bill again)
+        MaximumEventAgeInSeconds: 3600
+      Events:
+        Upload:
+          Type: S3
+          Properties:
+            Bucket: !Ref BillsBucket
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Rules: [{Name: prefix, Value: uploads/}]
+    Metadata:
+      DockerContext: .
+      Dockerfile: container/ocr/Dockerfile
+      DockerTag: v1
+
+  OcrLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${OcrFunction}"
+      RetentionInDays: 7
+
+  # ------------------------------------------------------------------ API (zip)
+  HttpApi:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      CorsConfiguration:
+        AllowOrigins: [!Ref AllowedOrigin]
+        AllowMethods: [GET, POST, OPTIONS]
+        AllowHeaders: [content-type]
+        MaxAge: 3000
+      DefaultRouteSettings:                # cost guard against abuse
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 10
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: api/
+      Handler: app.handler
+      Runtime: python3.11
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          BUCKET: !Ref BillsBucket
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action: s3:PutObject           # needed to sign the upload form
+              Resource: !Sub "${BillsBucket.Arn}/uploads/*"
+            - Effect: Allow
+              Action: s3:GetObject
+              Resource: !Sub "${BillsBucket.Arn}/results/*"
+            - Effect: Allow
+              Action: s3:ListBucket          # so a missing result is "NoSuchKey", not AccessDenied
+              Resource: !GetAtt BillsBucket.Arn
+      Events:
+        CreateJob:
+          Type: HttpApi
+          Properties: {ApiId: !Ref HttpApi, Method: POST, Path: /jobs}
+        GetJob:
+          Type: HttpApi
+          Properties: {ApiId: !Ref HttpApi, Method: GET, Path: "/jobs/{job_id}"}
+
+  ApiLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${ApiFunction}"
+      RetentionInDays: 7
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for the web UI (config.js)
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.${AWS::URLSuffix}"
+  BucketName:
+    Value: !Ref BillsBucket

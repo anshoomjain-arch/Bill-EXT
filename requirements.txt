@@ -1,0 +1,11 @@
+# Pinned to the versions in the working local environment (paddle-env, Python 3.11).
+# Full transitive freeze: requirements-lock.txt
+paddlepaddle==3.4.0
+paddleocr==3.7.0
+paddlex==3.7.2
+numpy==2.3.5
+opencv-contrib-python==4.10.0.84
+openpyxl==3.1.5
+pillow==12.1.0
+pyclipper==1.4.0
+shapely==2.2.0

@@ -1,0 +1,41 @@
+# SAM CLI settings for both stacks. Copy to samconfig.toml (git-ignored) and replace:
+#   YOUR_AWS_PROFILE  your named profile in ~/.aws/credentials
+#   ACCOUNT_ID        your 12-digit AWS account id
+#   AllowedOrigin     "*" for the first deploy; then your Amplify URL (README.md, step 7)
+version = 0.1
+
+# ---- pipeline 1 (rules): sam build / sam deploy
+[default.global.parameters]
+stack_name = "bill-ocr-demo"
+profile = "YOUR_AWS_PROFILE"
+region = "ap-southeast-2"
+
+[default.build.parameters]
+cached = true
+
+[default.deploy.parameters]
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+# ECR repo created once with the AWS CLI (README.md, step 3), not by a SAM companion stack
+image_repositories = ["OcrFunction=ACCOUNT_ID.dkr.ecr.ap-southeast-2.amazonaws.com/billocrdemo-ocr"]
+parameter_overrides = "OcrMemoryMB=3008 AllowedOrigin=*"
+
+# ---- pipeline 2 (Qwen): sam build --config-env qwen / sam deploy --config-env qwen
+[qwen.global.parameters]
+stack_name = "bill-ocr-demo-qwen"
+profile = "YOUR_AWS_PROFILE"
+region = "ap-southeast-2"
+
+[qwen.build.parameters]
+cached = true
+template_file = "template-qwen.yaml"
+build_dir = ".aws-sam/build-qwen"
+
+[qwen.deploy.parameters]
+template_file = ".aws-sam/build-qwen/template.yaml"
+capabilities = "CAPABILITY_IAM"
+confirm_changeset = true
+resolve_s3 = true
+image_repositories = ["QwenOcrFunction=ACCOUNT_ID.dkr.ecr.ap-southeast-2.amazonaws.com/billocrdemo-qwen"]
+parameter_overrides = "OcrMemoryMB=3008 AllowedOrigin=*"
